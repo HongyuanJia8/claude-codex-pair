@@ -6,7 +6,7 @@ A lightweight, **opt-in** dual-agent development workflow for [Claude Code](http
 
 No frameworks, no mandatory state machine, no context copy-pasting between terminals. The whole workflow is two slash commands that do nothing until you explicitly invoke them.
 
-设计文档（中文）见 [WORKFLOW.md](WORKFLOW.md)。
+See [WORKFLOW.md](WORKFLOW.md) for the full design doc.
 
 ## How it works
 
@@ -68,16 +68,6 @@ cp -R skills/pair skills/pair-review ~/.claude/skills/
 
 Then `/pair` and `/pair-review` are available in every project. Installing changes nothing about normal usage — the skills explicitly refuse to auto-activate and only run when you type the command.
 
-## Design choices (and what was deliberately left out)
-
-Borrowed from [Superpowers](https://github.com/obra/superpowers) — as ideas, not dependencies: lightweight brainstorm before planning, a handoff plan as the inter-agent artifact, verification-before-completion, capped fix/review loops.
-
-Deliberately **not** adopted:
-
-- Full-ceremony pipelines for every micro-task (Superpowers' default intensity)
-- OpenSpec / Spec Kit — the strict-profile handoff doc already serves as a lightweight spec shared by both agents
-- Prescribing implementation details to the implementer — handoffs state *what* and *acceptance criteria*, never *how*, so the model underneath is free to do its best work
-
 ## License
 
-No license yet — open an issue if you want to use this and care.
+[MIT](LICENSE)

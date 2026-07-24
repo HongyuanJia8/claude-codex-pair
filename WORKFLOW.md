@@ -1,69 +1,58 @@
-# 双 Agent 开发工作流（/pair）设计文档
+# The /pair Dual-Agent Workflow — Design Doc
 
-> Claude Code 规划与审查，Codex 实现，git 自动化。默认关闭，显式调用才启动。
+> Claude Code plans and reviews, Codex implements, git is automated. Off by default; runs only when explicitly invoked.
 
-## 设计理念
+## Design principles
 
-1. **开关即调用**：不装任何常驻框架、不改默认行为。skill 只有在你显式输入
-   `/pair` / `/pair-review` 时才运行；平时正常对话零开销。
-2. **上下文隔离**：实现者（Codex）和审查者（全新上下文的 Claude subagent）互不
-   共享对话历史。审查者只读，不能顺手改代码。
-3. **确定性质量门**：format / lint / typecheck / test 由脚本退出码判定，
-   不信任何 agent 自称"测试已通过"。
-4. **不限制基模发挥**：交给 Codex 的 handoff 文档只写目标、约束、验收标准和
-   相关文件指引，刻意不写实现方案。
-5. **循环有上限**：修复—质量门循环最多 2 轮，review—修复循环最多 2 轮，
-   到顶就停下来向你报告，绝不无限打转。
+1. **Invocation is the switch.** No resident framework, no change to default behavior. The skills run only when you type `/pair` / `/pair-review`; ordinary conversations carry zero overhead.
+2. **Context isolation.** The implementer (Codex) and the reviewer (a fresh-context Claude subagent) share no conversation history. The reviewer is read-only and cannot "helpfully" edit code.
+3. **Deterministic quality gates.** Format / lint / typecheck / test are judged by script exit codes — never by an agent claiming "tests pass".
+4. **Don't constrain the base model.** The handoff document given to Codex states goals, constraints, acceptance criteria, and pointers to relevant files — deliberately not the implementation approach.
+5. **Bounded loops.** Fix–gate cycles cap at 2 rounds, review–fix cycles cap at 2 rounds; at the cap the workflow stops and reports instead of spinning forever.
 
-## 核心桥接机制（免手动复制上下文）
+## The bridge (no manual context copying)
 
-- Claude Code 在会话内直接 `codex exec -c approval_policy=never - < handoff.md`
-  无头调用 Codex；handoff 走 stdin，不污染项目目录。
-- 修复循环用 `codex exec resume --last "<反馈>"` —— Codex 保留完整实现上下文，
-  只需要发增量反馈。
-- Codex 的产出通过 `git diff` 回到 Claude Code 手里，审查、质量门、commit 全部自动。
+- Claude Code invokes Codex headlessly from within the session:
+  `codex exec -c approval_policy=never - < handoff.md` — the handoff travels via stdin and never pollutes the project directory.
+- Fix rounds use `codex exec resume --last "<feedback>"` — Codex keeps its full implementation context, so only incremental feedback is sent.
+- Codex's output returns to Claude Code through `git diff`; review, quality gates, and the commit are all automated.
 
-## 用法
+## Usage
 
-| 命令 | 场景 | 流程 |
+| Command | When | Flow |
 |---|---|---|
-| （不调用） | 小修改、问问题 | 正常对话，工作流不存在 |
-| `/pair fast <任务>` | 小任务但想让 Codex 干活 | 一段话指令 → Codex → 质量门 → commit |
-| `/pair <任务>` | 中等功能（默认 standard 档） | 澄清 → handoff 文档 → 分支 → Codex → 质量门 → Claude 只读 review（≤2 轮修复） → commit |
-| `/pair strict <任务>` | 高风险/复杂改动 | standard + 计划需你人工批准 + 双重 review（Claude subagent 与 `codex exec review`），高危分歧时问你 |
-| `/pair-review` | 只想要第二双眼睛 | 全新只读 subagent 审当前未提交改动；加 `codex` 参数叠加 Codex 原生 review；加 `base <branch>` 审分支 diff |
+| *(nothing)* | Small edits, questions | Normal chat; the workflow doesn't exist |
+| `/pair fast <task>` | Small task, but let Codex do it | One-paragraph instruction → Codex → gates → commit |
+| `/pair <task>` | Medium feature (default: standard) | Clarify → handoff doc → branch → Codex → gates → read-only Claude review (≤2 fix rounds) → commit |
+| `/pair strict <task>` | High-risk / complex change | Standard + human plan approval + dual review (Claude subagent and `codex exec review`); stops to ask on high-severity disagreement |
+| `/pair-review` | Just a second pair of eyes | Fresh read-only subagent reviews uncommitted changes; add `codex` to also run Codex's native review, `base <branch>` to review a branch diff |
 
-合并、push、开 PR 永远由你决定，工作流只 commit 到 `pair/*` 功能分支。
+Merging, pushing, and opening PRs are always your call — the workflow only commits to `pair/*` feature branches.
 
-## 保留人工决策的节点
+## Hard human-decision gates
 
-无论哪个档位，遇到以下情况一律停下来问你：
+Regardless of profile, the workflow stops and asks before:
 
-- 合并到主分支或 push
-- 数据库 migration
-- 删除/覆盖用户数据
-- auth、权限、支付相关逻辑
-- 公共 API 破坏性变更
-- 大规模依赖新增/升级
+- merging into the main branch, or pushing anywhere
+- database migrations
+- deleting or overwriting user data
+- auth, permissions, or payment logic
+- breaking changes to a public API
+- large dependency additions/upgrades
 
-## 对社区框架的取舍
+## Trade-offs vs. community frameworks
 
-- **Superpowers**：不安装。只借了 4 个思想 —— 规划前轻量 brainstorm（最多问 2-3
-  个问题，且仅在需求模糊时）、handoff 计划作为交接工件、完成前验证清单、有上限的
-  修复-审查循环。不采用它"每个微任务走全流程"、强制 TDD、每任务 fresh subagent
-  的重型默认。
-- **OpenSpec / Spec Kit**：都不装。strict 档的 handoff 文档就是轻量 spec，足以让
-  两个 agent 共享一致需求。将来若有大型 greenfield 项目再单独评估 Spec Kit。
+- **Superpowers**: not installed. Four ideas were borrowed — a lightweight brainstorm before planning (at most 2–3 questions, and only when the task is ambiguous), the handoff plan as the inter-agent artifact, verification-before-completion, and capped fix/review loops. Its heavyweight defaults — full ceremony for every micro-task, mandatory TDD, a fresh subagent per task — were not adopted.
+- **OpenSpec / Spec Kit**: neither installed. The strict-profile handoff doc already serves as a lightweight spec shared by both agents. Spec Kit can be re-evaluated if a large greenfield project ever calls for it.
 
-## 可选扩展（按需再做）
+## Optional extensions (add when needed)
 
-- **自动 Draft PR**：安装并登录 `gh` CLI 后，可在 Phase 6 加 `gh pr create --draft`。
-- **反向调用**：在 `~/.codex/prompts/` 加一个自定义命令，让你在 Codex TUI 里也能
-  一键 `claude -p` 叫 Claude review —— 适合以 Codex 为主界面的工作日。
-- **并行任务**：同时跑多个 `/pair` 时改用 `git worktree`，每个任务独立目录互不干扰。
+- **Auto Draft PR**: with `gh` CLI installed and authenticated, Phase 6 can add `gh pr create --draft`.
+- **Reverse direction**: add a custom command under `~/.codex/prompts/` so that Codex TUI can call `claude -p` for a review with one command — useful on Codex-first workdays.
+- **Parallel tasks**: when running multiple `/pair` tasks at once, switch to `git worktree` so each task gets an isolated directory.
 
-## 文件位置
+## File locations
 
-- `~/.claude/skills/pair/SKILL.md` — 主工作流
-- `~/.claude/skills/pair-review/SKILL.md` — 独立交叉审查
-- `~/.claude/skills/pair/WORKFLOW.md` — 本文档
+- `~/.claude/skills/pair/SKILL.md` — main workflow
+- `~/.claude/skills/pair-review/SKILL.md` — standalone cross-review
+- `~/.claude/skills/pair/WORKFLOW.md` — this document
