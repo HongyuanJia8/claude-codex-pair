@@ -21,7 +21,8 @@ Claude Code — clarifies (only if ambiguous), writes a short handoff:
 git checkout -b pair/<slug>
  │
  ▼
-Codex implements headlessly:  codex exec -c approval_policy=never - < handoff.md
+Codex implements headlessly:
+              codex exec -s workspace-write -c approval_policy=never - < handoff.md
  │
  ▼
 Deterministic quality gates:  format → lint → typecheck → test

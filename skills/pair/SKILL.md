@@ -60,8 +60,14 @@ in parallel, create a worktree per task instead (`git worktree add`).
 From the repo root:
 
 ```bash
-codex exec -c approval_policy=never - < <scratchpad>/pair-handoff.md
+codex exec -s workspace-write -c approval_policy=never - < <scratchpad>/pair-handoff.md
 ```
+
+**Always pass `-s workspace-write` explicitly on every `codex exec` in this workflow.**
+Since headless runs disable approvals, the sandbox is the only remaining boundary — it must
+not be inherited from `~/.codex/config.toml`, where a temporary global `danger-full-access`
+would otherwise make `/pair` run unsandboxed and unapproved without any visible signal.
+Never use `--dangerously-bypass-approvals-and-sandbox` here.
 
 (fast profile: pass the paragraph as the prompt argument instead of stdin.)
 
@@ -78,7 +84,7 @@ format check → lint → typecheck → tests → build.
 
 - **Exit codes decide pass/fail. Never trust an agent's claim that "tests pass".**
 - On failure: send the failing command + trimmed output back to Codex:
-  `codex exec -c approval_policy=never resume --last "Quality gate failed: <command>\n<output>\nFix it."`
+  `codex exec -s workspace-write -c approval_policy=never resume --last "Quality gate failed: <command>\n<output>\nFix it."`
   then re-run the gates. **Maximum 2 fix rounds**; if still failing, stop and report to the user
   with the failure output — do not loop further and do not fix it silently yourself.
 
@@ -94,13 +100,13 @@ Read/Grep/Glob/Bash(read-only) and to never edit files. Give it:
   claim, and a **concrete failure scenario** (inputs/state → wrong behavior).
   Style nits and speculative concerns are out of scope.
 
-If there are real findings: send them to Codex via `codex exec -c approval_policy=never resume --last`,
+If there are real findings: send them to Codex via `codex exec -s workspace-write -c approval_policy=never resume --last`,
 re-run Phase 4 gates, and re-review only the changed areas. **Maximum 2 review rounds.**
 Unresolved findings after that: report them to the user; they decide.
 
 **strict only**: additionally run Codex's native reviewer:
 ```bash
-codex exec review --base <base-branch>
+codex exec -s read-only -c approval_policy=never review --base <base-branch>
 ```
 Merge both reviewers' findings. If the two reviewers disagree on a high-severity
 finding, stop and ask the user to arbitrate.

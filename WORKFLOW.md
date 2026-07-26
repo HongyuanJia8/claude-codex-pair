@@ -13,7 +13,11 @@
 ## The bridge (no manual context copying)
 
 - Claude Code invokes Codex headlessly from within the session:
-  `codex exec -c approval_policy=never - < handoff.md` — the handoff travels via stdin and never pollutes the project directory.
+  `codex exec -s workspace-write -c approval_policy=never - < handoff.md` — the handoff travels via stdin and never pollutes the project directory.
+- **The sandbox is pinned on the command line, never inherited.** Headless runs disable
+  approvals, so the sandbox is the only remaining boundary; passing `-s` explicitly keeps a
+  temporarily laxer `~/.codex/config.toml` (e.g. a global `danger-full-access`) from silently
+  widening what `/pair` can do. Review invocations pin `-s read-only`.
 - Fix rounds use `codex exec resume --last "<feedback>"` — Codex keeps its full implementation context, so only incremental feedback is sent.
 - Codex's output returns to Claude Code through `git diff`; review, quality gates, and the commit are all automated.
 

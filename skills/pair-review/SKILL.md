@@ -15,8 +15,11 @@ Lightweight standalone review, for when the full /pair workflow is not in play
 - No args: review **uncommitted** changes (staged + unstaged + untracked) with a fresh Claude subagent.
 - `base <branch>`: review `git diff <branch>...HEAD` instead of uncommitted changes.
 - `codex`: ALSO run Codex's native reviewer and merge findings:
-  - uncommitted scope: `codex exec review --uncommitted`
-  - base scope: `codex exec review --base <branch>`
+  - uncommitted scope: `codex exec -s read-only -c approval_policy=never review --uncommitted`
+  - base scope: `codex exec -s read-only -c approval_policy=never review --base <branch>`
+
+  Pass `-s read-only` explicitly — reviewing never needs write access, and the sandbox must
+  not be inherited from `~/.codex/config.toml`, which may be temporarily set to a laxer mode.
 
 ## Procedure
 
