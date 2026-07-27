@@ -71,6 +71,7 @@ Or manually:
 
 ```bash
 cp -R skills/pair skills/pair-review ~/.claude/skills/
+cp WORKFLOW.md ~/.claude/skills/pair/
 ```
 
 Then `/pair` and `/pair-review` are available in every project. Installing changes nothing about normal usage — the skills explicitly refuse to auto-activate and only run when you type the command.
