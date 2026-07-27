@@ -9,6 +9,7 @@
 3. **Deterministic quality gates.** Format / lint / typecheck / test are judged by script exit codes — never by an agent claiming "tests pass".
 4. **Don't constrain the base model.** The handoff document given to Codex states goals, constraints, acceptance criteria, and pointers to relevant files — deliberately not the implementation approach.
 5. **Bounded loops.** Fix–gate cycles cap at 2 rounds, review–fix cycles cap at 2 rounds; at the cap the workflow stops and reports instead of spinning forever.
+6. **A commit per gated step.** Claude Code commits — never Codex — each time the quality gates go green: one commit for the implementation, one per review round. Gate-fix rounds fold into the following checkpoint, so no commit is ever made while a gate is red. The branch carries a readable trail (what was built → what each review round changed) and is meant to be merged as-is, with no squashing or history rewriting. Committing stays with the orchestrator because that is where the artifact/`.gitignore` check and the gate results live; Codex is told to leave its changes in the working tree.
 
 ## The bridge (no manual context copying)
 
@@ -19,7 +20,7 @@
   temporarily laxer `~/.codex/config.toml` (e.g. a global `danger-full-access`) from silently
   widening what `/pair` can do. Review invocations pin `-s read-only`.
 - Fix rounds use `codex exec resume --last "<feedback>"` — Codex keeps its full implementation context, so only incremental feedback is sent.
-- Codex's output returns to Claude Code through `git diff`; review, quality gates, and the commit are all automated.
+- Codex's output returns to Claude Code through `git diff`; review, quality gates, and the commits are all automated.
 
 ## Usage
 
@@ -27,11 +28,11 @@
 |---|---|---|
 | *(nothing)* | Small edits, questions | Normal chat; the workflow doesn't exist |
 | `/pair fast <task>` | Small task, but let Codex do it | One-paragraph instruction → Codex → gates → commit |
-| `/pair <task>` | Medium feature (default: standard) | Clarify → handoff doc → branch → Codex → gates → read-only Claude review (≤2 fix rounds) → commit |
+| `/pair <task>` | Medium feature (default: standard) | Clarify → handoff doc → branch → Codex → gates → commit → read-only Claude review (≤2 fix rounds, commit per round) |
 | `/pair strict <task>` | High-risk / complex change | Standard + human plan approval + dual review (Claude subagent and `codex exec review`); stops to ask on high-severity disagreement |
 | `/pair-review` | Just a second pair of eyes | Fresh read-only subagent reviews uncommitted changes; add `codex` to also run Codex's native review, `base <branch>` to review a branch diff |
 
-Merging, pushing, and opening PRs are always your call — the workflow only commits to `pair/*` feature branches.
+Merging, pushing, and opening PRs are always your call — the workflow only commits to the feature branch it created (named after the task, no prefix).
 
 ## Hard human-decision gates
 

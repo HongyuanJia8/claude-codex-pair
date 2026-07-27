@@ -18,7 +18,7 @@ Claude Code — clarifies (only if ambiguous), writes a short handoff:
               goal + constraints + acceptance criteria. No implementation details.
  │
  ▼
-git checkout -b pair/<slug>
+git checkout -b <slug>
  │
  ▼
 Codex implements headlessly:
@@ -29,10 +29,14 @@ Deterministic quality gates:  format → lint → typecheck → test
               (exit codes decide — an agent's "tests pass" is never trusted)
  │  fail → codex exec resume --last "<failure output>"   (max 2 rounds)
  ▼
+gates green → commit the implementation
+ │
+ ▼
 Fresh-context, read-only Claude subagent reviews the diff
  │  findings → codex exec resume --last "<findings>"     (max 2 rounds)
+ │  each round: gates green → commit
  ▼
-Auto-commit to the pair/* branch → report to you.
+Report to you: commits, diffstat, gate results, review outcome.
 Merge / push / PR: always your call.
 ```
 
@@ -41,6 +45,7 @@ Key mechanics:
 - **No manual context shuttling** — the handoff goes to Codex via stdin; fix rounds use `codex exec resume --last`, which keeps Codex's full session context so only incremental feedback is sent.
 - **Implementer/reviewer isolation** — the reviewer is a fresh subagent with read-only tools; it shares no conversation history with the planner and cannot "helpfully" edit code.
 - **Bounded loops** — fix/review cycles cap at 2 rounds each, then stop and report.
+- **A commit per gated step** — Claude Code commits (never Codex) each time the gates go green: one for the implementation, one per review round. The branch keeps a readable trail and is meant to be merged as-is, no squashing or history surgery.
 - **Human gates** — merges, migrations, data deletion, auth/payment logic, and breaking API changes always stop and ask, regardless of profile.
 
 ## Commands

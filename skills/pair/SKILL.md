@@ -26,7 +26,7 @@ invoked headlessly via `codex exec` — the user never copies context between te
 1. Verify this is a git repository (`git rev-parse --git-dir`). If not, ask the user whether to `git init` or abort.
 2. Verify `codex` is on PATH. If not, stop and tell the user.
 3. If the working tree has uncommitted changes, ask the user whether to proceed anyway
-   (changes will get mixed into the pair branch) or stop so they can commit/stash first.
+   (changes will get mixed into the new branch) or stop so they can commit/stash first.
 4. Note the current branch name — it is the **base branch** for diffs and review.
 
 ## Phase 1 — Clarify & plan (you, current session)
@@ -49,8 +49,10 @@ invoked headlessly via `codex exec` — the user never copies context between te
 ## Phase 2 — Branch
 
 ```bash
-git checkout -b pair/<short-kebab-slug>
+git checkout -b <short-kebab-slug>
 ```
+
+Name the branch after the task, with no prefix — it is an ordinary feature branch.
 
 Do not use a worktree by default. Only if the user asked to run multiple `/pair` tasks
 in parallel, create a worktree per task instead (`git worktree add`).
@@ -76,6 +78,31 @@ Never use `--dangerously-bypass-approvals-and-sandbox` here.
   which keeps Codex's full context — never re-send the whole handoff.
 - Do NOT edit the code yourself in this phase. You orchestrate; Codex implements.
 
+## Committing (applies to Phases 4–6)
+
+**You commit, not Codex.** Codex leaves changes in the working tree; you stage and commit
+after checking them. This keeps every commit gated and keeps build artifacts out.
+
+Commit at each checkpoint where the tree is coherent — i.e. **right after the gates go
+green** following a Codex turn:
+
+| Checkpoint | Commit |
+|---|---|
+| Phase 4 gates pass on the initial implementation | one commit for the implementation |
+| Phase 5 review round N fixed and gates pass again | one commit per review round |
+
+So a task normally lands 1–3 commits on the branch, forming a readable trail
+(what was built → what review round 1 changed → …). The branch is meant to be merged
+as-is; do not squash or rewrite it afterwards.
+
+Before every commit:
+
+- Check `git status` for build artifacts (`__pycache__`, `node_modules`, `dist`, caches…)
+  — never stage them; add/extend `.gitignore` if the project lacks one.
+- Write a descriptive message: what changed and why. For review-round commits, say which
+  finding it addresses. Never commit while a gate is red — if the fix rounds are exhausted
+  and gates still fail, leave the work uncommitted and report.
+
 ## Phase 4 — Deterministic quality gates
 
 Detect what the project actually has (package.json scripts, Makefile, justfile,
@@ -87,6 +114,8 @@ format check → lint → typecheck → tests → build.
   `codex exec -s workspace-write -c approval_policy=never resume --last "Quality gate failed: <command>\n<output>\nFix it."`
   then re-run the gates. **Maximum 2 fix rounds**; if still failing, stop and report to the user
   with the failure output — do not loop further and do not fix it silently yourself.
+- Gate-fix rounds do not get their own commits; they fold into the checkpoint commit below.
+- **Once the gates are green, commit the implementation** (see Committing above).
 
 ## Phase 5 — Review (standard/strict; skip for fast)
 
@@ -102,6 +131,7 @@ Read/Grep/Glob/Bash(read-only) and to never edit files. Give it:
 
 If there are real findings: send them to Codex via `codex exec -s workspace-write -c approval_policy=never resume --last`,
 re-run Phase 4 gates, and re-review only the changed areas. **Maximum 2 review rounds.**
+Commit each round once its gates are green, with a message naming the findings it fixes.
 Unresolved findings after that: report them to the user; they decide.
 
 **strict only**: additionally run Codex's native reviewer:
@@ -115,12 +145,12 @@ finding, stop and ask the user to arbitrate.
 
 1. Verification before completion: gates green, acceptance criteria met (check each one),
    no stray debug output or leftover scratch files in the repo.
-2. Check `git status` for build artifacts (`__pycache__`, `node_modules`, `dist`, caches…)
-   before staging — never commit them; add/extend `.gitignore` if the project lacks one.
-3. Commit everything to the pair branch with a descriptive message summarizing the change.
-4. Report to the user: what was built, diffstat, gate results, review outcome
-   (including any accepted-but-unfixed findings).
-5. **Do NOT merge, push, or open a PR.** The user decides what happens to the branch.
+2. `git status` must be clean — everything from the checkpoints above is already committed.
+   If anything is left over, decide whether it belongs in the change (commit it, gates first)
+   or is junk (remove it); never leave the tree dirty without saying so.
+3. Report to the user: what was built, the commits on the branch (`git log --oneline <base>..HEAD`),
+   diffstat, gate results, review outcome (including any accepted-but-unfixed findings).
+4. **Do NOT merge, push, or open a PR.** The user decides what happens to the branch.
 
 ## Hard human-decision gates
 
