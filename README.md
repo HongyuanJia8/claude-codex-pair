@@ -46,6 +46,7 @@ Key mechanics:
 - **Implementer/reviewer isolation** — the reviewer is a fresh subagent with read-only tools; it shares no conversation history with the planner and cannot "helpfully" edit code.
 - **Bounded loops** — fix/review cycles cap at 2 rounds each, then stop and report.
 - **A commit per gated step** — Claude Code commits (never Codex) each time the gates go green: one for the implementation, one per review round. The branch keeps a readable trail and is meant to be merged as-is, no squashing or history surgery.
+- **Dependencies, tiered** — Codex sets up the project's own environment and installs its declared dependencies (repo-local only, with the package-manager cache dirs granted explicitly). Anything system-level — `brew`, global installs, `sudo`, new runtimes, containers — stops and asks; the sandbox denies it anyway, and approvals are off, so it can't be escalated.
 - **Human gates** — merges, migrations, data deletion, auth/payment logic, and breaking API changes always stop and ask, regardless of profile.
 
 ## Commands

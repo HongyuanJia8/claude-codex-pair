@@ -42,7 +42,10 @@ invoked headlessly via `codex exec` — the user never copies context between te
   - **Deliberately DO NOT prescribe the implementation approach** — no step-by-step design,
     no function signatures unless they are an external contract. Let Codex think.
   - End with: "When done, ensure the project's own format/lint/typecheck/test commands pass.
-    Do not commit; leave changes in the working tree. Do not touch anything outside this repository."
+    Do not commit; leave changes in the working tree. Do not touch anything outside this repository.
+    Set up the project's own environment and install its declared dependencies yourself
+    (project-local only). Anything system-level — package managers, global installs, sudo,
+    new runtimes, containers — is off limits: say what you need and stop instead."
 - **fast**: skip the doc; compose a single clear paragraph with the same spirit (goal + acceptance + don't commit).
 - **strict only**: show the handoff doc to the user and wait for explicit approval before continuing.
 
@@ -57,12 +60,49 @@ Name the branch after the task, with no prefix — it is an ordinary feature bra
 Do not use a worktree by default. Only if the user asked to run multiple `/pair` tasks
 in parallel, create a worktree per task instead (`git worktree add`).
 
+## Environment & dependencies
+
+The sandbox boundary is also the permission boundary: Codex may write inside the repo and
+nowhere else, and since approvals are off it cannot escalate. Three tiers follow from that.
+
+| Tier | What | Who does it |
+|---|---|---|
+| **1. Project-local** | Creating the project's virtualenv, installing deps already declared in its manifest, fetching modules — anything that writes only inside the repo (`.venv/`, `node_modules/`, in-repo build dirs) | Codex, on its own, no asking |
+| **2. Package-manager caches** | The cache dirs those installers write to, which live outside the repo | Codex, via the explicitly granted `--add-dir` roots below |
+| **3. System-level** | `brew`/`apt`/system package managers, global installs (`npm i -g`, `pipx`), `sudo`, installing an interpreter or runtime, container runtimes, changing global config, **adding a new heavyweight dependency to the manifest** | **Stop and ask the user** |
+
+Grant the cache roots for the project's ecosystem, and only those — never `$HOME`, never a
+config or credential directory:
+
+| Ecosystem | Add |
+|---|---|
+| Python (uv / pip) | `--add-dir ~/.cache/uv --add-dir ~/Library/Caches/pip` (Linux: `~/.cache/pip`) |
+| Node | `--add-dir ~/.npm` |
+| Go | `--add-dir ~/go/pkg/mod` |
+| Rust | `--add-dir ~/.cargo/registry` |
+
+A writable cache means a poisoned artifact in it would execute on the next install. That is
+the accepted cost of not re-downloading the world every task; widening the grant beyond
+caches is not.
+
+**Tier 3 is not a quality-gate failure.** If Codex reports a sandbox denial
+("operation not permitted"), an externally-managed-environment refusal (PEP 668), or a
+blocked `brew`/`sudo`, do not spend a fix round on it and do not work around it. Stop and
+tell the user what is needed, why, and the exact command to run; continue with
+`codex exec resume --last` once they have done it.
+
+**Codex never runs containers.** The daemon socket is outside the workspace so it is
+blocked anyway, but the real reason is that `docker run -v /:/host` is a complete sandbox
+escape. If the quality gates need a container (a database for integration tests, say),
+you (outside the sandbox) or the user start it before Phase 3; Codex only connects to it.
+
 ## Phase 3 — Codex implements
 
 From the repo root:
 
 ```bash
-codex exec -s workspace-write -c approval_policy=never - < <scratchpad>/pair-handoff.md
+codex exec -s workspace-write <cache --add-dir flags> \
+  -c approval_policy=never - < <scratchpad>/pair-handoff.md
 ```
 
 **Always pass `-s workspace-write` explicitly on every `codex exec` in this workflow.**
@@ -111,7 +151,7 @@ format check → lint → typecheck → tests → build.
 
 - **Exit codes decide pass/fail. Never trust an agent's claim that "tests pass".**
 - On failure: send the failing command + trimmed output back to Codex:
-  `codex exec -s workspace-write -c approval_policy=never resume --last "Quality gate failed: <command>\n<output>\nFix it."`
+  `codex exec -s workspace-write <cache --add-dir flags> -c approval_policy=never resume --last "Quality gate failed: <command>\n<output>\nFix it."`
   then re-run the gates. **Maximum 2 fix rounds**; if still failing, stop and report to the user
   with the failure output — do not loop further and do not fix it silently yourself.
 - Gate-fix rounds do not get their own commits; they fold into the checkpoint commit below.
@@ -129,7 +169,7 @@ Read/Grep/Glob/Bash(read-only) and to never edit files. Give it:
   claim, and a **concrete failure scenario** (inputs/state → wrong behavior).
   Style nits and speculative concerns are out of scope.
 
-If there are real findings: send them to Codex via `codex exec -s workspace-write -c approval_policy=never resume --last`,
+If there are real findings: send them to Codex via `codex exec -s workspace-write <cache --add-dir flags> -c approval_policy=never resume --last`,
 re-run Phase 4 gates, and re-review only the changed areas. **Maximum 2 review rounds.**
 Commit each round once its gates are green, with a message naming the findings it fixes.
 Unresolved findings after that: report them to the user; they decide.

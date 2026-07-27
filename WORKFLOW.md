@@ -22,6 +22,17 @@
 - Fix rounds use `codex exec resume --last "<feedback>"` — Codex keeps its full implementation context, so only incremental feedback is sent.
 - Codex's output returns to Claude Code through `git diff`; review, quality gates, and the commits are all automated.
 
+## Environment & dependencies
+
+The sandbox boundary turns out to be exactly the right permission boundary, so the policy needs no new enforcement mechanism — only a written rule so the implementer knows where the line is and a denial gets read as "this needs a human" rather than "the tool is flaky":
+
+- **Project-local setup is self-service.** Creating the virtualenv, installing declared dependencies, fetching modules — these write only inside the repo, which is precisely what `workspace-write` allows.
+- **Package-manager caches are granted explicitly.** They live outside the repo (`~/.cache/uv`, `~/.npm`, …), so the sandbox denies them by default and installs fail with an opaque error. Each `codex exec` grants the cache roots for the project's ecosystem via `--add-dir` — those directories only, never `$HOME`, never config or credential directories. A writable cache is real attack surface (a poisoned artifact executes on the next install); it is the accepted cost of not re-downloading everything each task.
+- **System-level installs stop and ask.** Package managers, global installs, `sudo`, new interpreters or runtimes, container runtimes. The sandbox denies these and approvals are off, so they cannot be escalated — the workflow reports what is needed and the exact command, and resumes after the user has run it. This is not a quality-gate failure and does not consume a fix round.
+- **Containers are never driven by the implementer.** Beyond the socket living outside the workspace, `docker run -v /:/host` is a complete sandbox escape; granting an agent container access cancels the sandbox. If the gates need a service, the orchestrator or the user starts it beforehand.
+
+One known tension: dependency installation needs the network, so `sandbox_workspace_write.network_access` stays enabled for implementation. Review invocations, which never install anything, run under `-s read-only`.
+
 ## Usage
 
 | Command | When | Flow |
