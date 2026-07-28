@@ -1,0 +1,84 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Lint install.sh
+        run: shellcheck install.sh
+
+      - name: install.sh delivers every file the skill needs
+        # Regression test: install.sh used to `rm -rf` the destination and then copy
+        # only skills/<name>/, which silently dropped WORKFLOW.md — it lives at the
+        # repo root because README links to it there.
+        run: |
+          dest="$(mktemp -d)"
+          CLAUDE_SKILLS_DIR="$dest" ./install.sh
+          status=0
+          for f in pair/SKILL.md pair/WORKFLOW.md pair-review/SKILL.md; do
+            if [ -f "$dest/$f" ]; then
+              echo "ok      $f"
+            else
+              echo "MISSING $f"; status=1
+            fi
+          done
+          diff -q WORKFLOW.md "$dest/pair/WORKFLOW.md" || status=1
+          # Installing twice must be idempotent, not additive or destructive.
+          CLAUDE_SKILLS_DIR="$dest" ./install.sh >/dev/null
+          [ -f "$dest/pair/WORKFLOW.md" ] || { echo "MISSING after reinstall: pair/WORKFLOW.md"; status=1; }
+          exit "$status"
+
+      - name: Skill frontmatter is well formed
+        run: |
+          status=0
+          for f in skills/*/SKILL.md; do
+            dir_name="$(basename "$(dirname "$f")")"
+            if [ "$(head -1 "$f")" != "---" ]; then
+              echo "$f: does not start with a YAML frontmatter fence"; status=1; continue
+            fi
+            block="$(awk 'NR>1 && /^---[[:space:]]*$/{exit} NR>1' "$f")"
+            name="$(printf '%s\n' "$block" | sed -n 's/^name:[[:space:]]*//p')"
+            desc="$(printf '%s\n' "$block" | sed -n 's/^description:[[:space:]]*//p')"
+            [ -n "$name" ] || { echo "$f: frontmatter has no name"; status=1; }
+            [ -n "$desc" ] || { echo "$f: frontmatter has no description"; status=1; }
+            # The directory name is what Claude Code matches on, so it has to agree.
+            [ "$name" = "$dir_name" ] || { echo "$f: name '$name' != directory '$dir_name'"; status=1; }
+            # These skills must never self-activate; the guarantee is load-bearing.
+            case "$desc" in
+              *NEVER\ activate*) ;;
+              *) echo "$f: description drops the never-auto-activate guarantee"; status=1 ;;
+            esac
+            echo "checked $f (name=$name)"
+          done
+          exit "$status"
+
+      - name: Relative links resolve
+        # Only repo-internal links — external URLs are left alone so CI never fails
+        # because someone else's site is down or rate-limiting.
+        run: |
+          status=0
+          while IFS=: read -r file line target; do
+            [ -n "$target" ] || continue
+            resolved="$(dirname "$file")/${target%%#*}"
+            if [ -e "$resolved" ]; then
+              echo "ok      $file:$line -> $target"
+            else
+              echo "BROKEN  $file:$line -> $target"; status=1
+            fi
+          done <<EOF
+          $(grep -rnoE '\]\([^)#][^):]*\)' --include='*.md' . \
+              | grep -v '](http' \
+              | sed -E 's/^\.\///; s/\]\(([^)]*)\)$/\1/')
+          EOF
+          exit "$status"
