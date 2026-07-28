@@ -5,9 +5,15 @@ set -euo pipefail
 SRC="$(cd "$(dirname "$0")" && pwd)/skills"
 DEST="${CLAUDE_SKILLS_DIR:-$HOME/.claude/skills}"
 
+# This script runs `rm -rf` under $DEST, so refuse to guess where that is.
+if [ -z "${DEST%/}" ]; then
+  echo "error: CLAUDE_SKILLS_DIR is empty or /; refusing to run" >&2
+  exit 1
+fi
+
 mkdir -p "$DEST"
 for skill in pair pair-review; do
-  rm -rf "$DEST/$skill"
+  rm -rf "${DEST:?}/${skill:?}"
   cp -R "$SRC/$skill" "$DEST/$skill"
   echo "installed $DEST/$skill"
 done
