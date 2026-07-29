@@ -28,6 +28,13 @@ invoked headlessly via `codex exec` — the user never copies context between te
 3. If the working tree has uncommitted changes, ask the user whether to proceed anyway
    (changes will get mixed into the new branch) or stop so they can commit/stash first.
 4. Note the current branch name — it is the **base branch** for diffs and review.
+5. **Record the baseline.** Detect the project's gate commands (see Phase 4) and run them
+   *before* handing anything to Codex. Write down, for each: the command, its exit code, and
+   the test runner's own count line (`42 passed`, `ok 17`, …). Everything in Phase 4 is judged
+   against this baseline, not against zero — otherwise a suite that was already red burns a fix
+   round on someone else's debt, and a suite that silently collects no tests looks like success.
+   If a runner reports no count, record "count unavailable" and say so in the final report;
+   never substitute a guess.
 
 ## Phase 1 — Clarify & plan (you, current session)
 
@@ -37,17 +44,30 @@ invoked headlessly via `codex exec` — the user never copies context between te
   (use the session scratchpad dir, e.g. `<scratchpad>/pair-handoff.md`). Contents:
   - Goal: what to build/change and why (2–5 sentences).
   - Constraints: language/framework conventions, files or areas involved, things NOT to touch.
-  - Acceptance criteria: observable behaviors, edge cases that must work, tests that must pass.
+  - Acceptance criteria: observable behaviors and edge cases, written as things a test could
+    assert. Name the **seams** — the public boundaries the new behavior should be tested
+    through (the exported function, the HTTP route, the CLI invocation), not the internals
+    behind them. Criteria the project cannot observe from outside are not criteria.
   - Pointers: relevant existing files/functions/patterns you found, so Codex doesn't re-explore blindly.
   - **Deliberately DO NOT prescribe the implementation approach** — no step-by-step design,
     no function signatures unless they are an external contract. Let Codex think.
-  - End with: "When done, ensure the project's own format/lint/typecheck/test commands pass.
+  - End with: "Cover the new behavior with tests, written at the seams named above and
+    following the project's existing testing conventions. A test whose expected value is
+    recomputed the way the code computes it proves nothing — expected values must be
+    independent literals. Do not mock the thing under test.
+    Do not modify or delete existing tests to make a command pass. If an existing test now
+    fails and you believe the test itself is wrong, stop and say so with your reasoning
+    instead of changing it.
+    Then run the project's own format/lint/typecheck/test commands and report each one's
+    exit code and test count verbatim — do not summarize them as 'passing'.
     Do not commit; leave changes in the working tree. Do not touch anything outside this repository.
     Set up the project's own environment and install its declared dependencies yourself
     (project-local only). Anything system-level — package managers, global installs, sudo,
     new runtimes, containers — is off limits: say what you need and stop instead."
 - **fast**: skip the doc; compose a single clear paragraph with the same spirit (goal + acceptance + don't commit).
-- **strict only**: show the handoff doc to the user and wait for explicit approval before continuing.
+- **strict only**: show the handoff doc to the user and wait for explicit approval before
+  continuing. Include the seam list in what you ask them to approve — testing effort lands
+  where the seams say it lands, so an unconfirmed seam is an unmade decision.
 
 ## Phase 2 — Branch
 
@@ -149,13 +169,41 @@ Detect what the project actually has (package.json scripts, Makefile, justfile,
 pyproject.toml, Cargo.toml, go.mod, CI config) and run the applicable subset, in order:
 format check → lint → typecheck → tests → build.
 
-- **Exit codes decide pass/fail. Never trust an agent's claim that "tests pass".**
+**Exit codes decide pass/fail. Never trust an agent's claim that "tests pass".** That much is
+necessary but not sufficient: a green suite proves you did not break what already worked, not
+that the new behavior is tested. Three assertions, all against the Preflight baseline:
+
+| Assertion | Fails when |
+|---|---|
+| **Exit code** | any gate command returns non-zero |
+| **Test count** | the count is below baseline, or is zero, or the suite collected nothing (a runner that matches no files can still exit 0) |
+| **Test integrity** | the diff weakens the suite — see below |
+
+For test integrity, read `git diff <base-branch> -- <the project's test paths>` yourself before
+committing. Treat as a **red gate**, not a style nit:
+
+- a deleted test, or a deleted/loosened assertion in a test that still exists
+- an assertion that now recomputes its expected value the way the code does
+  (`expect(add(a,b)).toBe(a+b)`) — it passes by construction and can never disagree
+- a newly mocked internal collaborator standing between the test and the thing under test
+- `skip` / `only` / `xfail` / commented-out cases added to the suite
+
+Any of these means the gate went green by lowering the bar. Send it back as a failure.
+
+- **New behavior with no new test is also a red gate.** If the diff adds behavior and the test
+  count did not move, the gates have not verified anything about it.
 - On failure: send the failing command + trimmed output back to Codex:
-  `codex exec -s workspace-write <cache --add-dir flags> -c approval_policy=never resume --last "Quality gate failed: <command>\n<output>\nFix it."`
+  `codex exec -s workspace-write <cache --add-dir flags> -c approval_policy=never resume --last "Quality gate failed: <command>\n<output>\nFix the code — do not change the tests."`
   then re-run the gates. **Maximum 2 fix rounds**; if still failing, stop and report to the user
   with the failure output — do not loop further and do not fix it silently yourself.
 - Gate-fix rounds do not get their own commits; they fold into the checkpoint commit below.
-- **Once the gates are green, commit the implementation** (see Committing above).
+- **strict only — confirm the new tests can fail.** A test that has never been red may assert
+  nothing. Stash the non-test part of the change (`git stash push -- <source paths>`), re-run
+  the suite, and check the new tests now fail; `git stash pop` afterwards. A new test that
+  still passes without the implementation is a red gate.
+- **Once all three assertions hold, commit the implementation** (see Committing above).
+- Report every assertion's outcome, including any you could not evaluate (a runner with no
+  count, a project with no test paths). Never let an unavailable check read as a passing one.
 
 ## Phase 5 — Review (standard/strict; skip for fast)
 
@@ -164,10 +212,15 @@ this session's planning. The subagent must be read-only: instruct it to only use
 Read/Grep/Glob/Bash(read-only) and to never edit files. Give it:
 
 - The diff scope: `git diff <base-branch>...HEAD` plus untracked files.
-- The acceptance criteria from the handoff doc (not the implementation history).
+- The acceptance criteria and seams from the handoff doc (not the implementation history).
 - Instruction: report only real defects — each finding needs file:line, a one-sentence
   claim, and a **concrete failure scenario** (inputs/state → wrong behavior).
   Style nits and speculative concerns are out of scope.
+- Instruction: judge the tests as well as the code, and treat a bad test as a defect in its
+  own right. Specifically — does each acceptance criterion have a test that would actually
+  fail if the behavior regressed? Is any test tautological (expected value recomputed the way
+  the code computes it), coupled to internals rather than the named seam, or passing only
+  because a collaborator was mocked out? Did the diff weaken the existing suite?
 
 If there are real findings: send them to Codex via `codex exec -s workspace-write <cache --add-dir flags> -c approval_policy=never resume --last`,
 re-run Phase 4 gates, and re-review only the changed areas. **Maximum 2 review rounds.**
