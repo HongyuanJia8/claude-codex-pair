@@ -29,6 +29,10 @@ Lightweight standalone review, for when the full /pair workflow is not in play
    (Read/Grep/Glob/read-only Bash; never edit). Give it the diff scope and instruct:
    report only real defects, each with file:line, a one-sentence claim, and a concrete
    failure scenario (inputs/state → wrong behavior). No style nits, no speculation.
+   Judge the tests too, and treat a bad test as a defect: a test whose expected value is
+   recomputed the way the code computes it, one that passes only because a collaborator was
+   mocked out, one coupled to internals rather than a public boundary, or a diff that deletes
+   or loosens assertions in the existing suite. Note behavior the diff adds with no test.
 3. If `codex` was requested, run the codex review command in parallel with a generous timeout.
 4. Merge and dedupe findings, ranked most severe first. Note which reviewer found what
    only when the two disagree.

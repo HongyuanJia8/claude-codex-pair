@@ -26,14 +26,19 @@ Codex implements headlessly:
  │
  ▼
 Deterministic quality gates:  format → lint → typecheck → test
-              (exit codes decide — an agent's "tests pass" is never trusted)
- │  fail → codex exec resume --last "<failure output>"   (max 2 rounds)
+              exit codes decide — an agent's "tests pass" is never trusted
+              + test count vs. the pre-handoff baseline (a suite that
+                collected nothing also exits 0)
+              + test-diff integrity (deleted assertions, new mocks,
+                tautological expectations = red gate)
+ │  fail → codex exec -s workspace-write ... resume --last "<failure output>"  (max 2 rounds)
  ▼
 gates green → commit the implementation
  │
  ▼
 Fresh-context, read-only Claude subagent reviews the diff
- │  findings → codex exec resume --last "<findings>"     (max 2 rounds)
+ │  (judges the tests too — a tautological or mocked-out test is a defect)
+ │  findings → codex exec -s workspace-write ... resume --last "<findings>"     (max 2 rounds)
  │  each round: gates green → commit
  ▼
 Report to you: commits, diffstat, gate results, review outcome.
@@ -44,6 +49,7 @@ Key mechanics:
 
 - **No manual context shuttling** — the handoff goes to Codex via stdin; fix rounds use `codex exec resume --last`, which keeps Codex's full session context so only incremental feedback is sent.
 - **Implementer/reviewer isolation** — the reviewer is a fresh subagent with read-only tools; it shares no conversation history with the planner and cannot "helpfully" edit code.
+- **The gate proves more than "green"** — a passing suite only shows nothing already-working broke. The gate also asserts the test count held against a baseline taken *before* the handoff, and that the diff didn't buy its green by deleting assertions, mocking out the thing under test, or writing expectations that recompute the code's own answer. New behavior with a flat test count is a red gate. The handoff asks for tests at named **seams**, and the strict profile stashes the implementation to confirm the new tests actually fail without it.
 - **Bounded loops** — fix/review cycles cap at 2 rounds each, then stop and report.
 - **A commit per gated step** — Claude Code commits (never Codex) each time the gates go green: one for the implementation, one per review round. The branch keeps a readable trail and is meant to be merged as-is, no squashing or history surgery.
 - **Dependencies, tiered** — Codex sets up the project's own environment and installs its declared dependencies (repo-local only, with the package-manager cache dirs granted explicitly). Anything system-level — `brew`, global installs, `sudo`, new runtimes, containers — stops and asks; the sandbox denies it anyway, and approvals are off, so it can't be escalated.
